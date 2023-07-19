@@ -6,9 +6,30 @@ import csv
 from datetime import datetime
 from collections.abc import MutableMapping
 import tempfile
+import pandas as pd
 
+# Flatten nested dictionaries
+def flatten(d, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, MutableMapping):
+            items.extend(flatten(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
-# The flatten and filtered_flatten functions remain unchanged.
+# Filtered flatten - keeps only specified keys
+def filtered_flatten(d, keys_to_keep, parent_key='', sep='_'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if new_key in keys_to_keep:
+            if isinstance(v, MutableMapping):
+                items.extend(flatten(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+    return dict(items)
 
 def process_file(file):
     # Create a temporary directory for processing
@@ -24,23 +45,55 @@ def process_file(file):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(unzipped_folder)
 
-        # ... Rest of the code remains mostly unchanged ...
+        # Locate the 'tweets.js' file in the 'data' subfolder
+        data_folder = os.path.join(unzipped_folder, 'data')
+        tweets_js_path = os.path.join(data_folder, 'tweets.js')
 
-        # Define the path for the CSV file
-        csv_file_path = os.path.join(tempdir, f"tweets{timestamp}.csv")
-        # ... More code ...
+        # Read the contents of 'tweets.js'
+        with open(tweets_js_path, 'r') as file:
+            contents = file.read()
 
-        # In the end, allow the user to download the generated CSV
-        with open(csv_file_path, 'rb') as f:
-            st.download_button(
-                label="Download CSV File",
-                data=f,
-                file_name="tweets.csv",
-                mime="text/csv"
-            )
+        # Find the index of the first square bracket
+        first_bracket_index = contents.index('[')
 
-        # Open Google Sheets link in a new tab
-        st.markdown("[Open Google Sheets](https://sheet.new)", unsafe_allow_html=True)
+        # Remove characters before the first square bracket
+        trimmed_contents = contents[first_bracket_index:]
+
+        # Load the JSON data
+        data = json.loads(trimmed_contents)
+
+        # Define the keys to keep
+        keys_to_keep = [
+            'entities_user_mentions',
+            'favorite_count',
+            'in_reply_to_status_id_str',
+            'id_str',
+            'in_reply_to_user_id',
+            'retweet_count',
+            'created_at',
+            'full_text',
+            'in_reply_to_screen_name'
+        ]
+
+        # Extract values from dictionaries 
+        flat_data_list = [filtered_flatten(tweet, keys_to_keep) for tweet in data]
+        
+        # Create a pandas DataFrame from the flattened data
+        df = pd.DataFrame(flat_data_list)
+
+        # Render the DataFrame in the browser
+        st.write(df)
+
+        # Create CSV data from DataFrame
+        csv_data = df.to_csv(index=False).encode("utf-8")
+
+        # Offer a download button for the CSV
+        st.download_button(
+            label="Download CSV File",
+            data=csv_data,
+            file_name="tweets.csv",
+            mime="text/csv"
+        )
 
 # Streamlit code to display the UI
 st.title("Twitter Data Processor")
