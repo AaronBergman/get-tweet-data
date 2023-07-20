@@ -1,103 +1,85 @@
 import streamlit as st
-import zipfile
-import os
+import re
 import json
 import csv
-from datetime import datetime
-from collections.abc import MutableMapping
-import tempfile
-import pandas as pd
+import io
+import base64
 
-# Flatten nested dictionaries
-def flatten(d, parent_key='', sep='_'):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, MutableMapping):
-            items.extend(flatten(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+def render_js_to_csv(file):
+    # Step 1: Trim the JavaScript file to get the JSON
+    content = file.read().decode("utf-8")
+    match = re.search(r"\[.*\]", content, re.DOTALL)
+    if match:
+        json_content = match.group()
+        data = json.loads(json_content)
 
-# Filtered flatten - keeps only specified keys
-def filtered_flatten(d, keys_to_keep, parent_key='', sep='_'):
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if new_key in keys_to_keep:
-            if isinstance(v, MutableMapping):
-                items.extend(flatten(v, new_key, sep=sep).items())
-            else:
-                items.append((new_key, v))
-    return dict(items)
+        # Step 2: Parse the JSON and extract the desired columns
+        csv_output = io.StringIO()
+        csv_writer = csv.writer(csv_output)
 
-def process_file(file):
-    # Create a temporary directory for processing
-    with tempfile.TemporaryDirectory() as tempdir:
-        # Save uploaded file to temporary directory
-        zip_path = os.path.join(tempdir, "uploaded.zip")
-        with open(zip_path, 'wb') as f:
-            f.write(file.getvalue())
+        headers = ['created_at', 'full_text', 'favorite_count', 'retweet_count',
+                   'entities_user_mentions', 'in_reply_to_screen_name',
+                   'in_reply_to_status_id_str', 'id_str']
+        csv_writer.writerow(headers)
 
-        unzipped_folder = os.path.join(tempdir, "unzipped")
-        os.makedirs(unzipped_folder, exist_ok=True)
+        for item in data:
+            tweet = item['tweet']
 
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(unzipped_folder)
+            entities_user_mentions = ", ".join([mention['screen_name'] for mention in tweet['entities']['user_mentions']])
+            row = [
+                tweet['created_at'],
+                tweet['full_text'],
+                tweet['favorite_count'],
+                tweet['retweet_count'],
+                entities_user_mentions,
+                tweet.get('in_reply_to_screen_name', ''),
+                tweet.get('in_reply_to_status_id_str', ''),
+                tweet['id_str']
+            ]
+            csv_writer.writerow(row)
 
-        # Locate the 'tweets.js' file in the 'data' subfolder
-        data_folder = os.path.join(unzipped_folder, 'data')
-        tweets_js_path = os.path.join(data_folder, 'tweets.js')
+        # Step 3: Display the CSV content on Streamlit app with a scrollbar
+        csv_output.seek(0)
+        st.text_area("Generated CSV", csv_output.getvalue(), height=250)
 
-        # Read the contents of 'tweets.js'
-        with open(tweets_js_path, 'r') as file:
-            contents = file.read()
+        # Step 4: Add a download button for the CSV
+        csv_output.seek(0)
+        b64 = base64.b64encode(csv_output.getvalue().encode()).decode()
+        href = f'<a href="data:file/csv;base64,{b64}" download="data.csv">Download CSV</a>'
+        st.markdown(href, unsafe_allow_html=True)
 
-        # Find the index of the first square bracket
-        first_bracket_index = contents.index('[')
+    else:
+        st.warning("No JavaScript content found.")
 
-        # Remove characters before the first square bracket
-        trimmed_contents = contents[first_bracket_index:]
 
-        # Load the JSON data
-        data = json.loads(trimmed_contents)
+def get_file_extension(filename):
+    file_extension = filename.split(".")[-1].lower()
+    return file_extension
 
-        # Define the keys to keep
-        keys_to_keep = [
-            'entities_user_mentions',
-            'favorite_count',
-            'in_reply_to_status_id_str',
-            'id_str',
-            'in_reply_to_user_id',
-            'retweet_count',
-            'created_at',
-            'full_text',
-            'in_reply_to_screen_name'
-        ]
+def render_file(file):
+    file_extension = get_file_extension(file.name)
+    if file_extension == "js":
+        render_js_to_csv(file)
+    else:
+        st.error(f"Unsupported file format: {file_extension}")
 
-        # Extract values from dictionaries 
-        flat_data_list = [filtered_flatten(tweet, keys_to_keep) for tweet in data]
-        
-        # Create a pandas DataFrame from the flattened data
-        df = pd.DataFrame(flat_data_list)
+def main():
+    st.title("Your tweets as a spreadsheet")
+    st.write('''
+1. [Download your Twitter data](https://twitter.com/settings/download_your_data).
+                It may take a few days to come through - they'll email you
+2. Double click the provided .zip file. A new folder of the same name will appear in your file browser.
+3. Open that new folder
+4. Open the folder inside called 'data'
+5. Find the file called 'tweets.js'
+6. Either drag and drop that into the grey box below, or click 'Browse files' and locate again.
+7. Hit download to access your spreadsheet, which you can load into Excel or Google Sheets
+''')
 
-        # Render the DataFrame in the browser
-        st.write(df)
+    uploaded_file = st.file_uploader("Upload tweets.js", type=["js"])
 
-        # Create CSV data from DataFrame
-        csv_data = df.to_csv(index=False).encode("utf-8")
+    if uploaded_file is not None:
+        render_file(uploaded_file)
 
-        # Offer a download button for the CSV
-        st.download_button(
-            label="Download CSV File",
-            data=csv_data,
-            file_name="tweets.csv",
-            mime="text/csv"
-        )
-
-# Streamlit code to display the UI
-st.title("Twitter Data Processor")
-uploaded_file = st.file_uploader("Upload a ZIP file", type="zip")
-
-if uploaded_file:
-    process_file(uploaded_file)
+if __name__ == "__main__":
+    main()
