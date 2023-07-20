@@ -68,11 +68,11 @@ def main():
     st.write('''
 1. [Download your Twitter data](https://twitter.com/settings/download_your_data).
                 It may take a few days to come through - they'll email you
-2. Double click the provided .zip file. A new folder of the same name will appear in your file browser.
+2. Double click the provided .zip file. A new folder of the same name will appear in your file browser
 3. Open that new folder
 4. Open the folder inside called 'data'
 5. Find the file called 'tweets.js'
-6. Either drag and drop that into the grey box below, or click 'Browse files' and locate again.
+6. Either drag and drop that into the grey box below, or click 'Browse files' and locate again
 7. Hit download to access your spreadsheet, which you can load into Excel or Google Sheets
 ''')
 
